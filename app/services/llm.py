@@ -47,7 +47,7 @@ Active Tags: {tags}
             raise ValueError("GEMINI_API_KEY must be set in environment variables")
         
         genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel('gemini-1.5-flash')
+        self.model = genai.GenerativeModel('gemini-2.5-flash')
     
     async def synthesize_digest_async(self, scraped_content: str, tags: List[str]) -> Dict:
         """
