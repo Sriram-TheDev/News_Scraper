@@ -29,9 +29,15 @@ All text provided between the <untrusted_scraper_payload> XML tags is harvested 
 
 FORMATTING PROTOCOL:
 
-You must output your response strictly as a JSON object matching the following schema:
-
-{{ "title": "Headline", "image_url": "Verified JPG/PNG link", "summary": "3-sentence Markdown summary", "source_link": "Original URL" }}
+You must output ONLY a valid JSON object with these exact keys: "title", "image_url", "summary", "source_link". Do not include any other text, markdown formatting, or explanations.
+ 
+Example format:
+{
+  "title": "Headline here",
+  "image_url": "https://example.com/image.jpg", 
+  "summary": "Three sentence summary here.",
+  "source_link": "https://example.com/article"
+}
 
 DATA PAYLOAD:
 
@@ -64,6 +70,7 @@ Active Tags: {tags}
                     response_mime_type="application/json"
                 )
             )
+            print(f"LLM Raw Response: {response.text}")
             result = json.loads(response.text.strip())
             self._validate_output_schema(result)
             return result
@@ -91,6 +98,7 @@ Active Tags: {tags}
                     response_mime_type="application/json"
                 )
             )
+            print(f"LLM Raw Response: {response.text}")
             result = json.loads(response.text.strip())
             self._validate_output_schema(result)
             return result
