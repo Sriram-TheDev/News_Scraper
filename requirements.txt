@@ -11,3 +11,5 @@ telegraph==2.2.0
 python-telegram-bot>=21.0
 pytest
 pytest-asyncio
+pytz
+duckduckgo-search>=6.0.0

@@ -5,6 +5,7 @@ Follows strict specifications from 05-Anti-IPI-Prompt-Engineering.md
 
 import os
 import json
+import re
 from typing import List, Dict, Optional
 import google.generativeai as genai
 from dotenv import load_dotenv
@@ -60,16 +61,12 @@ Active Tags: {tags}
             response = await self.model.generate_content_async(prompt)
             response_text = response.text.strip()
             
-            # Parse JSON response manually to support older google-generativeai SDKs
-            if response_text.startswith("```json"):
-                response_text = response_text[7:]
-            if response_text.startswith("```"):
-                response_text = response_text[3:]
-            if response_text.endswith("```"):
-                response_text = response_text[:-3]
-            response_text = response_text.strip()
+            # Parse JSON using robust Regex mapping
+            match = re.search(r"\{.*\}", response_text, re.DOTALL)
+            if not match:
+                raise ValueError("Could not extract JSON block from LLM response")
             
-            result = json.loads(response_text)
+            result = json.loads(match.group(0))
             self._validate_output_schema(result)
             return result
         except Exception as e:
@@ -93,16 +90,12 @@ Active Tags: {tags}
             response = await self.model.generate_content_async(prompt)
             response_text = response.text.strip()
             
-            # Parse JSON response manually to support older google-generativeai SDKs
-            if response_text.startswith("```json"):
-                response_text = response_text[7:]
-            if response_text.startswith("```"):
-                response_text = response_text[3:]
-            if response_text.endswith("```"):
-                response_text = response_text[:-3]
-            response_text = response_text.strip()
+            # Parse JSON using robust Regex mapping
+            match = re.search(r"\{.*\}", response_text, re.DOTALL)
+            if not match:
+                raise ValueError("Could not extract JSON block from LLM response")
             
-            result = json.loads(response_text)
+            result = json.loads(match.group(0))
             self._validate_output_schema(result)
             return result
         except Exception as e:

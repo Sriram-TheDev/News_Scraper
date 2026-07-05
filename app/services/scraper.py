@@ -38,26 +38,24 @@ class Scraper:
             raise Exception(f"Firecrawl scrape failed for {url}: {str(e)}")
     
     def search_query(self, query: str) -> List[dict]:
-        """Search for a specific query by using Firecrawl to scrape a search engine"""
-        import urllib.parse
-        encoded_query = urllib.parse.quote(query)
-        # Using the lightweight HTML version of DuckDuckGo for clean scraping
-        search_url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
+        """Search for a specific query by using duckduckgo-search bypass module"""
+        from duckduckgo_search import DDGS
         
         try:
-            scrape_result = self.app.scrape_url(
-                search_url,
-                params={'formats': ['markdown']}
-            )
+            results = []
+            # Fetch top 3 results using native anti-bot wrapper
+            search_results = DDGS().text(query, max_results=3)
             
-            if scrape_result and 'markdown' in scrape_result:
-                return [{
-                    'url': search_url,
-                    'title': f"Live Search Results for: {query}",
-                    'markdown': scrape_result['markdown']
-                }]
-            return []
-            
+            if not search_results:
+                return []
+                
+            for item in search_results:
+                results.append({
+                    'url': item.get('href', ''),
+                    'title': item.get('title', ''),
+                    'markdown': item.get('body', '')
+                })
+            return results
         except Exception as e:
             raise Exception(f"Live search failed for query '{query}': {str(e)}")
     

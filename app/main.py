@@ -118,9 +118,32 @@ async def cron_digest(
     verify_cron_token(x_cron_secret_token)
     
     try:
+        import datetime
+        import pytz
+        
         # Get bot settings
         db = get_db()
         settings = await asyncio.to_thread(db.get_bot_settings)
+        
+        # 1. Enforce Delivery Time (IST +05:30)
+        delivery_time = settings.get('delivery_time')
+        if delivery_time:
+            try:
+                ist = pytz.timezone('Asia/Kolkata')
+                now_ist = datetime.datetime.now(ist)
+                
+                target_hour, target_minute = map(int, delivery_time.split(':'))
+                target_time = now_ist.replace(hour=target_hour, minute=target_minute, second=0, microsecond=0)
+                
+                # Check if current time is within +/- 15 minutes of scheduled time
+                time_diff = abs((now_ist - target_time).total_seconds())
+                if time_diff > 900:  # 15 minutes window
+                    return {
+                        "status": "skipped", 
+                        "detail": f"Time mismatch. Current IST: {now_ist.strftime('%H:%M')}, Target: {delivery_time}"
+                    }
+            except Exception as e:
+                logger.error(f"Timezone parsing failed for '{delivery_time}': {e}")
         
         sources = settings.get('sources', [])
         tags = settings.get('tags', [])
