@@ -154,9 +154,9 @@ async def cron_digest(
             await get_telegram_bot().send_admin_alert("No new news to deliver")
             return {"status": "no_new_news"}
         
-        # Compile to Telegraph page
+        # Compile to Telegraph page concurrently
         telegraph = get_telegraph()
-        telegraph_url = await asyncio.to_thread(telegraph.compile_digest_page, news_items)
+        telegraph_url = await telegraph.compile_digest_page_async(news_items)
         
         # Send to admin
         telegram_bot = get_telegram_bot()
