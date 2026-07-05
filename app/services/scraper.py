@@ -38,35 +38,28 @@ class Scraper:
             raise Exception(f"Firecrawl scrape failed for {url}: {str(e)}")
     
     def search_query(self, query: str) -> List[dict]:
-        """
-        Perform a search query and return results
-        Used by the On-Demand Lane (Live Reporter)
-        Returns list of results with markdown content
-        """
+        """Search for a specific query by using Firecrawl to scrape a search engine"""
+        import urllib.parse
+        encoded_query = urllib.parse.quote(query)
+        # Using the lightweight HTML version of DuckDuckGo for clean scraping
+        search_url = f"https://html.duckduckgo.com/html/?q={encoded_query}"
+        
         try:
-            search_result = self.app.search(
-                query,
-                params={
-                    'pageOptions': {
-                        'includeHtml': False,
-                        'includeRawHtml': False,
-                        'onlyMainContent': True
-                    }
-                }
+            scrape_result = self.app.scrape_url(
+                search_url,
+                params={'formats': ['markdown']}
             )
             
-            # Extract relevant data from search results
-            results = []
-            for item in search_result.get('data', []):
-                results.append({
-                    'url': item.get('url', ''),
-                    'markdown': item.get('markdown', ''),
-                    'title': item.get('title', '')
-                })
+            if scrape_result and 'markdown' in scrape_result:
+                return [{
+                    'url': search_url,
+                    'title': f"Live Search Results for: {query}",
+                    'markdown': scrape_result['markdown']
+                }]
+            return []
             
-            return results
         except Exception as e:
-            raise Exception(f"Firecrawl search failed for query '{query}': {str(e)}")
+            raise Exception(f"Live search failed for query '{query}': {str(e)}")
     
     def scrape_multiple_urls(self, urls: List[str]) -> List[dict]:
         """

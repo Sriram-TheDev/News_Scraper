@@ -54,8 +54,8 @@ async def global_exception_handler(request: Request, exc: Exception):
         print(f"Failed to send admin alert: {str(telegram_error)}")
     
     return JSONResponse(
-        status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-        content={"detail": "Internal server error"}
+        status_code=status.HTTP_200_OK,
+        content={"detail": "Error handled gracefully to prevent webhook loops"}
     )
 
 
