@@ -47,7 +47,7 @@ Active Tags: {tags}
             raise ValueError("GEMINI_API_KEY must be set in environment variables")
         
         genai.configure(api_key=api_key)
-        self.model = genai.GenerativeModel('gemini-1.5-pro-latest')
+        self.model = genai.GenerativeModel('gemini-1.5-pro')
     
     async def synthesize_digest_async(self, scraped_content: str, tags: List[str]) -> Dict:
         """
@@ -58,15 +58,13 @@ Active Tags: {tags}
             payload=scraped_content
         )
         try:
-            response = await self.model.generate_content_async(prompt)
-            response_text = response.text.strip()
-            
-            # Parse JSON using robust Regex mapping
-            match = re.search(r"\{.*\}", response_text, re.DOTALL)
-            if not match:
-                raise ValueError("Could not extract JSON block from LLM response")
-            
-            result = json.loads(match.group(0))
+            response = await self.model.generate_content_async(
+                prompt,
+                generation_config=genai.GenerationConfig(
+                    response_mime_type="application/json"
+                )
+            )
+            result = json.loads(response.text.strip())
             self._validate_output_schema(result)
             return result
         except Exception as e:
@@ -87,15 +85,13 @@ Active Tags: {tags}
             payload=combined_payload
         )
         try:
-            response = await self.model.generate_content_async(prompt)
-            response_text = response.text.strip()
-            
-            # Parse JSON using robust Regex mapping
-            match = re.search(r"\{.*\}", response_text, re.DOTALL)
-            if not match:
-                raise ValueError("Could not extract JSON block from LLM response")
-            
-            result = json.loads(match.group(0))
+            response = await self.model.generate_content_async(
+                prompt,
+                generation_config=genai.GenerationConfig(
+                    response_mime_type="application/json"
+                )
+            )
+            result = json.loads(response.text.strip())
             self._validate_output_schema(result)
             return result
         except Exception as e:
