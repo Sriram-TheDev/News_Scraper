@@ -48,82 +48,52 @@ Active Tags: {tags}
         genai.configure(api_key=api_key)
         self.model = genai.GenerativeModel('gemini-1.5-pro')
     
-    def synthesize_digest(self, scraped_content: str, tags: List[str]) -> Dict:
+    async def synthesize_digest_async(self, scraped_content: str, tags: List[str]) -> Dict:
         """
-        Synthesize scraped content into structured news digest
-        Used by Scheduled Lane (Morning Digest)
-        Returns JSON object with title, image_url, summary, source_link
+        Synthesize scraped content into structured news digest asynchronously
         """
         prompt = self.SYSTEM_PROMPT.format(
             tags=", ".join(tags),
             payload=scraped_content
         )
-        
         try:
-            response = self.model.generate_content(prompt)
-            response_text = response.text.strip()
-            
-            # Parse JSON response
-            # Handle potential markdown code blocks
-            if response_text.startswith("```json"):
-                response_text = response_text[7:]
-            if response_text.startswith("```"):
-                response_text = response_text[3:]
-            if response_text.endswith("```"):
-                response_text = response_text[:-3]
-            response_text = response_text.strip()
-            
-            result = json.loads(response_text)
-            
-            # Validate schema
+            # Native Async Generation with JSON MIME type to force adherence
+            response = await self.model.generate_content_async(
+                prompt,
+                generation_config=genai.GenerationConfig(
+                    response_mime_type="application/json"
+                )
+            )
+            result = json.loads(response.text.strip())
             self._validate_output_schema(result)
-            
             return result
-        except json.JSONDecodeError as e:
-            raise Exception(f"Failed to parse LLM JSON output: {str(e)}")
         except Exception as e:
             raise Exception(f"LLM synthesis failed: {str(e)}")
     
-    def synthesize_live_report(self, search_results: List[Dict], query: str) -> Dict:
+    async def synthesize_live_report_async(self, search_results: List[Dict], query: str) -> Dict:
         """
-        Synthesize live search results into instant report
-        Used by On-Demand Lane (Live Reporter)
-        Returns JSON object with title, image_url, summary, source_link
+        Synthesize live search results into instant report asynchronously
         """
-        # Combine all search results into single payload
         combined_payload = ""
         for result in search_results:
             combined_payload += f"\n\nURL: {result.get('url', '')}\n"
             combined_payload += f"Title: {result.get('title', '')}\n"
             combined_payload += f"Content: {result.get('markdown', '')}\n"
         
-        # Use same prompt but with query context
         prompt = self.SYSTEM_PROMPT.format(
             tags=f"search query: {query}",
             payload=combined_payload
         )
-        
         try:
-            response = self.model.generate_content(prompt)
-            response_text = response.text.strip()
-            
-            # Parse JSON response
-            if response_text.startswith("```json"):
-                response_text = response_text[7:]
-            if response_text.startswith("```"):
-                response_text = response_text[3:]
-            if response_text.endswith("```"):
-                response_text = response_text[:-3]
-            response_text = response_text.strip()
-            
-            result = json.loads(response_text)
-            
-            # Validate schema
+            response = await self.model.generate_content_async(
+                prompt,
+                generation_config=genai.GenerationConfig(
+                    response_mime_type="application/json"
+                )
+            )
+            result = json.loads(response.text.strip())
             self._validate_output_schema(result)
-            
             return result
-        except json.JSONDecodeError as e:
-            raise Exception(f"Failed to parse LLM JSON output: {str(e)}")
         except Exception as e:
             raise Exception(f"LLM synthesis failed: {str(e)}")
     

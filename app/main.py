@@ -5,6 +5,7 @@ Follows specifications from 04-Security-Guardrails.md and 02-Architecture-and-Cl
 """
 
 import os
+import asyncio
 from fastapi import FastAPI, Header, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
@@ -42,7 +43,7 @@ async def global_exception_handler(request: Request, exc: Exception):
     # Log to digest_buffer
     try:
         db = get_db()
-        db.buffer_failed_digest(error_message, status="error")
+        await asyncio.to_thread(db.buffer_failed_digest, error_message, "error")
     except Exception as db_error:
         print(f"Failed to buffer error to database: {str(db_error)}")
     
@@ -114,7 +115,7 @@ async def cron_digest(
     try:
         # Get bot settings
         db = get_db()
-        settings = db.get_bot_settings()
+        settings = await asyncio.to_thread(db.get_bot_settings)
         
         sources = settings.get('sources', [])
         tags = settings.get('tags', [])
@@ -123,23 +124,26 @@ async def cron_digest(
             await get_telegram_bot().send_admin_alert("No sources configured for digest")
             return {"status": "no_sources"}
         
-        # Scrape all sources
+        # Scrape all sources asynchronously
         scraper = get_scraper()
-        scraped_data = scraper.scrape_multiple_urls(sources)
+        scraped_data = await asyncio.to_thread(scraper.scrape_multiple_urls, sources)
         
-        # Deduplicate against url_history
+        # Bulk query for deduplication (Fixes N+1 issue)
+        detected_urls = [item['url'] for item in scraped_data]
+        delivered_urls = await asyncio.to_thread(db.get_delivered_urls_bulk, detected_urls)
+        
         news_items = []
         for item in scraped_data:
             url = item['url']
-            if not db.is_url_delivered(url):
-                # Synthesize with LLM
+            if url not in delivered_urls:
+                # Synthesize with LLM natively unblocking the thread
                 llm = get_llm()
-                synthesized = llm.synthesize_digest(item['markdown'], tags)
+                synthesized = await llm.synthesize_digest_async(item['markdown'], tags)
                 synthesized['source_link'] = url
                 news_items.append(synthesized)
                 
                 # Mark as delivered
-                db.mark_url_delivered(url)
+                await asyncio.to_thread(db.mark_url_delivered, url)
         
         if not news_items:
             await get_telegram_bot().send_admin_alert("No new news to deliver")
@@ -147,11 +151,14 @@ async def cron_digest(
         
         # Compile to Telegraph page
         telegraph = get_telegraph()
-        telegraph_url = telegraph.compile_digest_page(news_items)
+        telegraph_url = await asyncio.to_thread(telegraph.compile_digest_page, news_items)
         
         # Send to admin
         telegram_bot = get_telegram_bot()
         await telegram_bot.send_digest_link(os.getenv("ADMIN_CHAT_ID"), telegraph_url)
+        
+        # Perform routine database cleanup (Log rotation)
+        await asyncio.to_thread(db.delete_old_digest_buffers, 7)
         
         return {"status": "success", "telegraph_url": telegraph_url}
     
@@ -188,18 +195,18 @@ async def search_command(
         return {"status": "unauthorized"}
     
     try:
-        # Perform search (stateless - no DB access)
+        # Perform search (stateless - thread isolated)
         scraper = get_scraper()
-        search_results = scraper.search_query(query)
+        search_results = await asyncio.to_thread(scraper.search_query, query)
         
         if not search_results:
             telegram_bot = get_telegram_bot()
             await telegram_bot.send_message(chat_id, "No results found")
             return {"status": "no_results"}
         
-        # Synthesize with LLM
+        # Synthesize with LLM natively unblocking the thread
         llm = get_llm()
-        report = llm.synthesize_live_report(search_results, query)
+        report = await llm.synthesize_live_report_async(search_results, query)
         
         # Send result
         telegram_bot = get_telegram_bot()
@@ -233,35 +240,35 @@ async def handle_command(chat_id: str, text: str):
     elif text.startswith('/addtag '):
         tag = text[8:].strip()
         if tag:
-            db.add_tag(tag)
+            await asyncio.to_thread(db.add_tag, tag)
             await telegram_bot.send_message(chat_id, f"✅ Added tag: {tag}")
     
     elif text.startswith('/removetag '):
         tag = text[11:].strip()
         if tag:
-            db.remove_tag(tag)
+            await asyncio.to_thread(db.remove_tag, tag)
             await telegram_bot.send_message(chat_id, f"✅ Removed tag: {tag}")
     
     elif text.startswith('/addsource '):
         source = text[11:].strip()
         if source:
-            db.add_source(source)
+            await asyncio.to_thread(db.add_source, source)
             await telegram_bot.send_message(chat_id, f"✅ Added source: {source}")
     
     elif text.startswith('/removesource '):
         source = text[14:].strip()
         if source:
-            db.remove_source(source)
+            await asyncio.to_thread(db.remove_source, source)
             await telegram_bot.send_message(chat_id, f"✅ Removed source: {source}")
     
     elif text.startswith('/settime '):
         time = text[9:].strip()
         if time:
-            db.update_delivery_time(time)
+            await asyncio.to_thread(db.update_delivery_time, time)
             await telegram_bot.send_message(chat_id, f"✅ Delivery time set to: {time}")
     
     elif text == '/status':
-        settings = db.get_bot_settings()
+        settings = await asyncio.to_thread(db.get_bot_settings)
         status_text = (
             f"📊 *Current Settings*\n\n"
             f"Delivery Time: {settings.get('delivery_time', 'N/A')}\n"
@@ -276,13 +283,13 @@ async def handle_command(chat_id: str, text: str):
             await telegram_bot.send_message(chat_id, f"🔍 Searching live web for: {query}...")
             try:
                 scraper = get_scraper()
-                search_results = scraper.search_query(query)
+                search_results = await asyncio.to_thread(scraper.search_query, query)
                 
                 if not search_results:
                     await telegram_bot.send_message(chat_id, "No results found on the web.")
                 else:
                     llm = get_llm()
-                    report = llm.synthesize_live_report(search_results, query)
+                    report = await llm.synthesize_live_report_async(search_results, query)
                     
                     title = report.get('title', 'Live Research Report')
                     summary = report.get('summary', 'No summary available.')

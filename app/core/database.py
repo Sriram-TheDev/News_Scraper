@@ -112,6 +112,19 @@ class Database:
         """Update status of a buffer entry"""
         response = self.client.table("digest_buffer").update({"status": status}).eq("id", buffer_id).execute()
         return response.data[0] if response.data else {}
+        
+    def get_delivered_urls_bulk(self, url_list: List[str]) -> set:
+        """Bulk check which URLs have already been delivered (Solves N+1 query problem)"""
+        if not url_list:
+            return set()
+        response = self.client.table("url_history").select("url").in_("url", url_list).execute()
+        return {item["url"] for item in response.data}
+        
+    def delete_old_digest_buffers(self, days_old: int = 7) -> None:
+        """Delete old digest buffers to prevent table bloat"""
+        import datetime
+        cutoff = (datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=days_old)).isoformat()
+        self.client.table("digest_buffer").delete().lt("created_at", cutoff).execute()
 
 
 # Singleton instance
