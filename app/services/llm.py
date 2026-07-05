@@ -57,14 +57,19 @@ Active Tags: {tags}
             payload=scraped_content
         )
         try:
-            # Native Async Generation with JSON MIME type to force adherence
-            response = await self.model.generate_content_async(
-                prompt,
-                generation_config=genai.GenerationConfig(
-                    response_mime_type="application/json"
-                )
-            )
-            result = json.loads(response.text.strip())
+            response = await self.model.generate_content_async(prompt)
+            response_text = response.text.strip()
+            
+            # Parse JSON response manually to support older google-generativeai SDKs
+            if response_text.startswith("```json"):
+                response_text = response_text[7:]
+            if response_text.startswith("```"):
+                response_text = response_text[3:]
+            if response_text.endswith("```"):
+                response_text = response_text[:-3]
+            response_text = response_text.strip()
+            
+            result = json.loads(response_text)
             self._validate_output_schema(result)
             return result
         except Exception as e:
@@ -85,13 +90,19 @@ Active Tags: {tags}
             payload=combined_payload
         )
         try:
-            response = await self.model.generate_content_async(
-                prompt,
-                generation_config=genai.GenerationConfig(
-                    response_mime_type="application/json"
-                )
-            )
-            result = json.loads(response.text.strip())
+            response = await self.model.generate_content_async(prompt)
+            response_text = response.text.strip()
+            
+            # Parse JSON response manually to support older google-generativeai SDKs
+            if response_text.startswith("```json"):
+                response_text = response_text[7:]
+            if response_text.startswith("```"):
+                response_text = response_text[3:]
+            if response_text.endswith("```"):
+                response_text = response_text[:-3]
+            response_text = response_text.strip()
+            
+            result = json.loads(response_text)
             self._validate_output_schema(result)
             return result
         except Exception as e:
