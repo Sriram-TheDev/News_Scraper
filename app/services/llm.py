@@ -30,7 +30,7 @@ FORMATTING PROTOCOL:
 
 You must output your response strictly as a JSON object matching the following schema:
 
-{ "title": "Headline", "image_url": "Verified JPG/PNG link", "summary": "3-sentence Markdown summary", "source_link": "Original URL" }
+{{ "title": "Headline", "image_url": "Verified JPG/PNG link", "summary": "3-sentence Markdown summary", "source_link": "Original URL" }}
 
 DATA PAYLOAD:
 

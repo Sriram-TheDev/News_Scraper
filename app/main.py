@@ -283,7 +283,14 @@ async def handle_command(chat_id: str, text: str):
                 else:
                     llm = get_llm()
                     report = llm.synthesize_live_report(search_results, query)
-                    await telegram_bot.send_live_report(chat_id, report)
+                    
+                    title = report.get('title', 'Live Research Report')
+                    summary = report.get('summary', 'No summary available.')
+                    source = report.get('source_link', 'Unknown Source')
+                    
+                    final_text = f"📰 *{title}*\n\n{summary}\n\n🔗 Source: {source}"
+                    
+                    await telegram_bot.send_live_report(chat_id, final_text)
             except Exception as e:
                 await telegram_bot.send_message(chat_id, f"⚠️ Search failed during processing. Check logs.")
                 raise e
