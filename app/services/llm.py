@@ -32,12 +32,12 @@ FORMATTING PROTOCOL:
 You must output ONLY a valid JSON object with these exact keys: "title", "image_url", "summary", "source_link". Do not include any other text, markdown formatting, or explanations.
  
 Example format:
-{
+{{
   "title": "Headline here",
   "image_url": "https://example.com/image.jpg", 
   "summary": "Three sentence summary here.",
   "source_link": "https://example.com/article"
-}
+}}
 
 DATA PAYLOAD:
 
