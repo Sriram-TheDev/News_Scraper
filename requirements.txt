@@ -6,6 +6,6 @@ google-generativeai==0.3.2
 pydantic==2.5.3
 pydantic-settings==2.1.0
 python-dotenv==1.0.0
-httpx==0.25.2
+httpx>=0.28.0
 telegraph==2.2.0
-python-telegram-bot==20.7
+python-telegram-bot>=21.0
