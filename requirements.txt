@@ -9,3 +9,5 @@ python-dotenv==1.0.0
 httpx>=0.28.0
 telegraph==2.2.0
 python-telegram-bot>=21.0
+pytest
+pytest-asyncio

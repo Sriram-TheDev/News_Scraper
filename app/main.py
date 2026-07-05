@@ -6,10 +6,18 @@ Follows specifications from 04-Security-Guardrails.md and 02-Architecture-and-Cl
 
 import os
 import asyncio
+import traceback
+import logging
 from fastapi import FastAPI, Header, HTTPException, Request, status
 from fastapi.responses import JSONResponse
 from contextlib import asynccontextmanager
-import traceback
+
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger("jit_news_bot")
+
 from app.core.database import get_db
 from app.services.scraper import get_scraper
 from app.services.llm import get_llm
@@ -21,15 +29,11 @@ from app.core.config import settings
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Lifespan context manager for startup/shutdown"""
-    # Startup
-    print("JIT News Bot starting up...")
+    logger.info("JIT News Bot starting up...")
     yield
-    # Shutdown
-    print("JIT News Bot shutting down...")
-
+    logger.info("JIT News Bot shutting down...")
 
 app = FastAPI(lifespan=lifespan)
-
 
 # Global exception handler for Fail-Loud pattern
 @app.exception_handler(Exception)
@@ -39,20 +43,21 @@ async def global_exception_handler(request: Request, exc: Exception):
     On any exception, log to database and alert admin via Telegram
     """
     error_message = f"Error in {request.url.path}: {str(exc)}\n\n{traceback.format_exc()}"
+    logger.error(f"Global Exception Caught: {error_message}")
     
     # Log to digest_buffer
     try:
         db = get_db()
         await asyncio.to_thread(db.buffer_failed_digest, error_message, "error")
     except Exception as db_error:
-        print(f"Failed to buffer error to database: {str(db_error)}")
+        logger.error(f"Failed to buffer error to database: {str(db_error)}")
     
     # Alert admin via Telegram
     try:
         telegram_bot = get_telegram_bot()
         await telegram_bot.send_admin_alert(f"🚨 *Critical Error*\n\n{error_message}")
     except Exception as telegram_error:
-        print(f"Failed to send admin alert: {str(telegram_error)}")
+        logger.error(f"Failed to send admin alert: {str(telegram_error)}")
     
     return JSONResponse(
         status_code=status.HTTP_200_OK,
