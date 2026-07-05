@@ -30,8 +30,17 @@ class TelegramBot:
             await self.bot.send_message(chat_id=chat_id, text=text, parse_mode='Markdown')
             return True
         except Exception as e:
-            print(f"Failed to send message: {str(e)}")
-            return False
+            try:
+                await self.bot.send_message(chat_id=chat_id, text=f"Failed with Markdown. Error: {str(e)}")
+                return True
+            except Exception as inner_e:
+                print(f"Failed to send message completely: {str(inner_e)}")
+                try:
+                    from app.core.database import get_db
+                    get_db().buffer_failed_digest(f"SEND_MESSAGE_FATAL: {str(inner_e)}", "error")
+                except:
+                    pass
+                return False
     
     async def send_admin_alert(self, message: str) -> bool:
         """
