@@ -38,22 +38,35 @@ class Scraper:
             raise Exception(f"Firecrawl scrape failed for {url}: {str(e)}")
     
     def search_query(self, query: str) -> List[dict]:
-        """Search for a specific query by using duckduckgo-search bypass module"""
-        from duckduckgo_search import DDGS
+        """Search for a specific query using Google News RSS for unbreakable live Intel"""
+        import urllib.request
+        import urllib.parse
+        import xml.etree.ElementTree as ET
         
         try:
-            results = []
-            # Fetch top 3 results using native anti-bot wrapper
-            search_results = DDGS().text(query, max_results=3)
+            encoded_query = urllib.parse.quote(query)
+            req = urllib.request.Request(
+                f'https://news.google.com/rss/search?q={encoded_query}&hl=en-US&gl=US&ceid=US:en', 
+                headers={'User-Agent': 'Mozilla/5.0'}
+            )
             
-            if not search_results:
+            html = urllib.request.urlopen(req, timeout=10.0).read()
+            root = ET.fromstring(html)
+            items = root.findall('.//item')
+            
+            if not items:
                 return []
                 
-            for item in search_results:
+            results = []
+            for item in items[:3]:  # Get top 3 news articles instantly
+                title = item.find('title')
+                link = item.find('link')
+                
                 results.append({
-                    'url': item.get('href', ''),
-                    'title': item.get('title', ''),
-                    'markdown': item.get('body', '')
+                    'url': link.text if link is not None else '',
+                    'title': title.text if title is not None else '',
+                    # The title itself contains enough context for the LLM to synthesize the latest breaking news
+                    'markdown': f"Live Breaking News Headline: {title.text if title is not None else ''}"
                 })
             return results
         except Exception as e:
