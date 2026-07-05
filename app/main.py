@@ -273,10 +273,20 @@ async def handle_command(chat_id: str, text: str):
     elif text.startswith('/search '):
         query = text[8:].strip()
         if query:
-            # This will be handled by the /search endpoint
-            # For now, send a message
-            await telegram_bot.send_message(chat_id, f"🔍 Searching for: {query}...")
-            # In production, this would trigger the search endpoint
+            await telegram_bot.send_message(chat_id, f"🔍 Searching live web for: {query}...")
+            try:
+                scraper = get_scraper()
+                search_results = scraper.search_query(query)
+                
+                if not search_results:
+                    await telegram_bot.send_message(chat_id, "No results found on the web.")
+                else:
+                    llm = get_llm()
+                    report = llm.synthesize_live_report(search_results, query)
+                    await telegram_bot.send_live_report(chat_id, report)
+            except Exception as e:
+                await telegram_bot.send_message(chat_id, f"⚠️ Search failed during processing. Check logs.")
+                raise e
     
     else:
         await telegram_bot.send_message(chat_id, "❓ Unknown command. Use /start for help.")
