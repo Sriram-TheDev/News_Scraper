@@ -26,12 +26,17 @@ class TelegramBot:
     
     async def send_message(self, chat_id: str, text: str) -> bool:
         """Send a text message to a chat"""
+        # Enforce Telegram's strict 4096 character limit
+        if len(text) > 4000:
+            text = text[:4000] + "\n\n...[Truncated]"
+            
         try:
             await self.bot.send_message(chat_id=chat_id, text=text, parse_mode='Markdown')
             return True
-        except Exception as e:
+        except Exception:
+            # If Markdown parsing fails (e.g., from unclosed LLM formatting), retry as raw plain text
             try:
-                await self.bot.send_message(chat_id=chat_id, text=f"Failed with Markdown. Error: {str(e)}")
+                await self.bot.send_message(chat_id=chat_id, text=text)
                 return True
             except Exception as inner_e:
                 print(f"Failed to send message completely: {str(inner_e)}")
