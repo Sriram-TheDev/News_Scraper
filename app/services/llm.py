@@ -91,6 +91,7 @@ Active Tags: {tags}
             tags=f"search query: {query}",
             payload=combined_payload
         )
+        prompt += "\n\nCRITICAL: Synthesize ALL the above search results into ONE SINGLE JSON object summarizing the overall topic. DO NOT output an array or list."
         try:
             response = await self.model.generate_content_async(
                 prompt,
@@ -108,16 +109,21 @@ Active Tags: {tags}
     def _extract_json(self, raw_text: str) -> dict:
         """
         Extract JSON from LLM response with regex fallback.
-        Handles cases where Gemini wraps JSON in markdown fences or conversational text.
+        Handles cases where Gemini wraps JSON in markdown fences, conversational text,
+        or unexpectedly returns a list of objects.
         """
         cleaned = raw_text.strip()
         try:
-            return json.loads(cleaned)
+            parsed = json.loads(cleaned)
+            if isinstance(parsed, list) and len(parsed) > 0:
+                return parsed[0]
+            return parsed
         except json.JSONDecodeError:
             # Regex fallback: extract first JSON object using DOTALL to match across newlines
             match = re.search(r"\{.*\}", cleaned, re.DOTALL)
             if match:
-                return json.loads(match.group(0))
+                parsed = json.loads(match.group(0))
+                return parsed
             raise ValueError(f"Could not extract JSON from LLM response: {cleaned[:200]}")
     
     def _validate_output_schema(self, result: Dict) -> None:
