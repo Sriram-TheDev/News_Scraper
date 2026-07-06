@@ -166,12 +166,16 @@ async def cron_digest(
             if url not in delivered_urls:
                 # Synthesize with LLM natively unblocking the thread
                 llm = get_llm()
-                synthesized = await llm.synthesize_digest_async(item['markdown'], tags)
-                synthesized['source_link'] = url
-                news_items.append(synthesized)
-                
-                # Mark as delivered
-                await asyncio.to_thread(db.mark_url_delivered, url)
+                try:
+                    synthesized = await llm.synthesize_digest_async(item['markdown'], tags)
+                    synthesized['source_link'] = url
+                    news_items.append(synthesized)
+                    
+                    # Mark as delivered
+                    await asyncio.to_thread(db.mark_url_delivered, url)
+                except Exception as e:
+                    logger.warning(f"Skipping article from {url} due to synthesis error: {e}")
+                    continue
         
         if not news_items:
             await get_telegram_bot().send_admin_alert("No new news to deliver")
