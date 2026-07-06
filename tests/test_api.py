@@ -28,7 +28,7 @@ def test_webhook_unauthorized_token():
         json={}
     )
     assert response.status_code == 401
-    assert "Unauthorized" in response.json()["detail"]
+    assert "Invalid secret token" in response.json()["detail"]
 
 def test_cron_digest_unauthorized_token():
     """Verify cron endpoint rejects invalid secret token"""
@@ -38,7 +38,7 @@ def test_cron_digest_unauthorized_token():
         json={}
     )
     assert response.status_code == 401
-    assert "Unauthorized" in response.json()["detail"]
+    assert "Invalid cron secret token" in response.json()["detail"]
 
 @patch("app.main.get_db")
 @patch("app.main.get_telegram_bot")

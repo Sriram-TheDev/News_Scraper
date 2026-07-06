@@ -123,10 +123,10 @@ async def cron_digest(
         
         # Get bot settings
         db = get_db()
-        settings = await asyncio.to_thread(db.get_bot_settings)
+        bot_settings = await asyncio.to_thread(db.get_bot_settings)
         
         # 1. Enforce Delivery Time (IST +05:30)
-        delivery_time = settings.get('delivery_time')
+        delivery_time = bot_settings.get('delivery_time')
         if delivery_time:
             try:
                 ist = pytz.timezone('Asia/Kolkata')
@@ -145,8 +145,8 @@ async def cron_digest(
             except Exception as e:
                 logger.error(f"Timezone parsing failed for '{delivery_time}': {e}")
         
-        sources = settings.get('sources', [])
-        tags = settings.get('tags', [])
+        sources = bot_settings.get('sources', [])
+        tags = bot_settings.get('tags', [])
         
         if not sources:
             await get_telegram_bot().send_admin_alert("No sources configured for digest")
@@ -296,12 +296,12 @@ async def handle_command(chat_id: str, text: str):
             await telegram_bot.send_message(chat_id, f"✅ Delivery time set to: {time}")
     
     elif text == '/status':
-        settings = await asyncio.to_thread(db.get_bot_settings)
+        bot_settings = await asyncio.to_thread(db.get_bot_settings)
         status_text = (
             f"📊 *Current Settings*\n\n"
-            f"Delivery Time: {settings.get('delivery_time', 'N/A')}\n"
-            f"Tags: {', '.join(settings.get('tags', []))}\n"
-            f"Sources: {len(settings.get('sources', []))} configured"
+            f"Delivery Time: {bot_settings.get('delivery_time', 'N/A')}\n"
+            f"Tags: {', '.join(bot_settings.get('tags', []))}\n"
+            f"Sources: {len(bot_settings.get('sources', []))} configured"
         )
         await telegram_bot.send_message(chat_id, status_text)
     
@@ -318,14 +318,7 @@ async def handle_command(chat_id: str, text: str):
                 else:
                     llm = get_llm()
                     report = await llm.synthesize_live_report_async(search_results, query)
-                    
-                    title = report.get('title', 'Live Research Report')
-                    summary = report.get('summary', 'No summary available.')
-                    source = report.get('source_link', 'Unknown Source')
-                    
-                    final_text = f"📰 *{title}*\n\n{summary}\n\n🔗 Source: {source}"
-                    
-                    await telegram_bot.send_live_report(chat_id, final_text)
+                    await telegram_bot.send_live_report(chat_id, report)
             except Exception as e:
                 await telegram_bot.send_message(chat_id, f"⚠️ Search failed during processing. Check logs.")
                 raise e

@@ -71,7 +71,7 @@ Active Tags: {tags}
                 )
             )
             print(f"LLM Raw Response: {response.text}")
-            result = json.loads(response.text.strip())
+            result = self._extract_json(response.text)
             self._validate_output_schema(result)
             return result
         except Exception as e:
@@ -99,11 +99,26 @@ Active Tags: {tags}
                 )
             )
             print(f"LLM Raw Response: {response.text}")
-            result = json.loads(response.text.strip())
+            result = self._extract_json(response.text)
             self._validate_output_schema(result)
             return result
         except Exception as e:
             raise Exception(f"LLM synthesis failed: {str(e)}")
+    
+    def _extract_json(self, raw_text: str) -> dict:
+        """
+        Extract JSON from LLM response with regex fallback.
+        Handles cases where Gemini wraps JSON in markdown fences or conversational text.
+        """
+        cleaned = raw_text.strip()
+        try:
+            return json.loads(cleaned)
+        except json.JSONDecodeError:
+            # Regex fallback: extract first JSON object using DOTALL to match across newlines
+            match = re.search(r"\{.*\}", cleaned, re.DOTALL)
+            if match:
+                return json.loads(match.group(0))
+            raise ValueError(f"Could not extract JSON from LLM response: {cleaned[:200]}")
     
     def _validate_output_schema(self, result: Dict) -> None:
         """

@@ -4,8 +4,9 @@ Converts structured JSON to Telegraph pages with SSRF protection
 Follows specifications from 04-Security-Guardrails.md
 """
 
+import asyncio
 import httpx
-from typing import Dict, Optional
+from typing import Dict, List, Optional
 from telegraph import Telegraph
 
 
@@ -35,7 +36,9 @@ class TelegraphCompiler:
             response = await client.head(url, follow_redirects=True, timeout=10.0)
             
             content_type = response.headers.get('content-type', '').lower()
-            if content_type not in ['image/jpeg', 'image/png', 'image/webp']:
+            # Per Obsidian spec 04-Security-Guardrails: strictly image/jpeg, image/png, image/gif
+            # Using substring matching to handle charset suffixes (e.g. "image/jpeg; charset=utf-8")
+            if not any(t in content_type for t in ['image/jpeg', 'image/png', 'image/gif']):
                 return ""
             
             content_length = response.headers.get('content-length')
@@ -55,16 +58,13 @@ class TelegraphCompiler:
         """
         # Step 1: Concurrently verify all images
         async with httpx.AsyncClient() as client:
-            tasks = []
-            for item in news_items:
-                image_url = item.get('image_url', '')
-                if image_url:
-                    tasks.append(self.verify_image_url_async(client, image_url))
-                else:
-                    async def dummy_task(): return ""
-                    tasks.append(dummy_task())
+            async def _verify_or_empty(url: str):
+                if url:
+                    return await self.verify_image_url_async(client, url)
+                return ""
             
-            verified_urls = await __import__('asyncio').gather(*tasks)
+            tasks = [_verify_or_empty(item.get('image_url', '')) for item in news_items]
+            verified_urls = await asyncio.gather(*tasks)
             
         # Step 2: Inject verified URLs back into the payload
         html_content = "<h2>Morning News Digest</h2>"
