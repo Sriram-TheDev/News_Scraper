@@ -83,6 +83,35 @@ def test_webhook_authorized_but_ignored(mock_bot, mock_db):
 
 
 # ==============================================================================
+# Scraper Tests
+# ==============================================================================
+class TestScraperDecoders:
+    """Test URL decoding and scraping utilities"""
+    
+    def test_google_news_decoder(self):
+        """Verify the scraper successfully rips naked URLs out of Google RSS Base64 wrappers"""
+        from app.services.scraper import Scraper
+        with patch('app.services.scraper.FirecrawlApp'):
+            scraper = Scraper()
+            
+        # Example encrypted Google News URL
+        raw_url = "https://news.google.com/rss/articles/CBMiPmh0dHBzOi8vd3d3LndpcmVkLmNvbS9zdG9yeS9vcGVuYWktYmFycmVkLWJ5LWl0YWxpYW4tcmVndWxhdG9ycy_SAQA?hl=en-IN&gl=IN&ceid=IN:en"
+        
+        decoded = scraper._decode_google_news_url(raw_url)
+        assert decoded == "https://www.wired.com/story/openai-barred-by-italian-regulators/"
+
+    def test_google_news_decoder_passthrough(self):
+        """Verify normal URLs are not corrupted if passed to decoder"""
+        from app.services.scraper import Scraper
+        with patch('app.services.scraper.FirecrawlApp'):
+            scraper = Scraper()
+            
+        normal_url = "https://techcrunch.com/2026/07/08/ai-news/"
+        decoded = scraper._decode_google_news_url(normal_url)
+        assert decoded == normal_url
+
+
+# ==============================================================================
 # LLM Schema Normalization Tests
 # ==============================================================================
 class TestLLMSchemaNormalization:

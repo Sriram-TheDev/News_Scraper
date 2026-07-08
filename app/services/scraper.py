@@ -11,6 +11,9 @@ import urllib.request
 import urllib.parse
 import xml.etree.ElementTree as ET
 import logging
+import base64
+import re
+import concurrent.futures
 from typing import List, Optional
 from firecrawl import FirecrawlApp
 
@@ -28,10 +31,38 @@ class Scraper:
             raise ValueError("FIRECRAWL_API_KEY must be set in environment variables")
         self.app = FirecrawlApp(api_key=api_key)
 
+    def _decode_google_news_url(self, raw_url: str) -> str:
+        """
+        Reverse-engineers and decodes the hidden naked URL from a Google News RSS link.
+        Google uses a Base64-like wrapper under 'articles/CBMi...'.
+        """
+        try:
+            if '/articles/' not in raw_url:
+                return raw_url
+                
+            hash_part = raw_url.split('/articles/')[-1].split('?')[0]
+            # Ensure proper padding for base64
+            padding_needed = len(hash_part) % 4
+            if padding_needed:
+                hash_part += '=' * (4 - padding_needed)
+                
+            # Use URL-safe base64 decoding and decode with a permissive encoding
+            decoded_bytes = base64.urlsafe_b64decode(hash_part)
+            decoded_str = decoded_bytes.decode('latin1', errors='ignore')
+            
+            # Regex out the actual http/https URL from the protobuf noise
+            match = re.search(r'https?://[^\s\x00-\x1F]+', decoded_str)
+            if match:
+                return match.group(0)
+            return raw_url
+        except Exception as e:
+            logger.warning(f"Failed to decode Google News URL {raw_url}: {str(e)}")
+            return raw_url
+
     def scrape_url(self, url: str) -> str:
         """
         Scrape a single URL and return Markdown content
-        Used by the Scheduled Lane (Morning Digest)
+        Used by the Scheduled Lane (Morning Digest) and Live Reporter
         """
         try:
             scrape_result = self.app.scrape_url(
@@ -45,7 +76,7 @@ class Scraper:
             raise Exception(f"Firecrawl scrape failed for {url}: {str(e)}")
 
     def search_query(self, query: str) -> List[dict]:
-        """Search for a specific query using Google News RSS for unbreakable live Intel"""
+        """Search for a specific query using Google News RSS, decode actual links, and deeply scrape in parallel"""
         try:
             encoded_query = urllib.parse.quote(query)
             req = urllib.request.Request(
@@ -61,16 +92,37 @@ class Scraper:
                 return []
 
             results = []
-            for item in items[:3]:  # Get top 3 news articles instantly
-                title = item.find('title')
-                link = item.find('link')
-
+            
+            # Step 1: Decode URLs to bypass Google JS redirects
+            for item in items[:3]:
+                title_elem = item.find('title')
+                link_elem = item.find('link')
+                
+                raw_url = link_elem.text if link_elem is not None else ''
+                true_url = self._decode_google_news_url(raw_url)
+                
                 results.append({
-                    'url': link.text if link is not None else '',
-                    'title': title.text if title is not None else '',
-                    # The title itself contains enough context for the LLM to synthesize the latest breaking news
-                    'markdown': f"Live Breaking News Headline: {title.text if title is not None else ''}"
+                    'url': true_url,
+                    'title': title_elem.text if title_elem is not None else '',
+                    'markdown': '' # will be populated below
                 })
+                
+            # Step 2: Concurrently scrape full content for the decoded URLs
+            def fetch_content(result_dict):
+                try:
+                    if result_dict['url']:
+                        md = self.scrape_url(result_dict['url'])
+                        if md and md.strip():
+                            result_dict['markdown'] = f"Headline: {result_dict['title']}\n\n{md}"
+                            return
+                except Exception as e:
+                    logger.warning(f"Live search deep scrape failed for {result_dict['url']}: {str(e)}")
+                # Fallback to headline only if scrape fails
+                result_dict['markdown'] = f"Headline: {result_dict['title']} (Full content could not be scraped)"
+
+            with concurrent.futures.ThreadPoolExecutor(max_workers=3) as executor:
+                executor.map(fetch_content, results)
+
             return results
         except Exception as e:
             raise Exception(f"Live search failed for query '{query}': {str(e)}")
