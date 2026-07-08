@@ -17,8 +17,9 @@ class Settings(BaseSettings):
     # Firecrawl API
     firecrawl_api_key: str
     
-    # Gemini API
-    gemini_api_key: str
+    # Groq API
+    groq_api_key: str
+    groq_model: str = "llama-3.3-70b-versatile"
     
     # Telegram Bot Configuration
     telegram_bot_token: str

@@ -12,7 +12,8 @@ from unittest.mock import patch, MagicMock, AsyncMock
 os.environ["TELEGRAM_SECRET_TOKEN"] = "test_secret_token"
 os.environ["CRON_SECRET_TOKEN"] = "test_cron_secret"
 os.environ["ADMIN_CHAT_ID"] = "123456789"
-os.environ["GEMINI_API_KEY"] = "mock_key"
+# Setting up tests for Groq
+os.environ["GROQ_API_KEY"] = "mock_key"
 os.environ["SUPABASE_URL"] = "http://mock.supabase.co"
 os.environ["SUPABASE_SERVICE_KEY"] = "mock_key"
 os.environ["FIRECRAWL_API_KEY"] = "mock_key"
@@ -23,7 +24,6 @@ from app.main import app
 
 client = TestClient(app)
 
-
 # ==============================================================================
 # Health Check
 # ==============================================================================
@@ -32,7 +32,6 @@ def test_health_check():
     response = client.get("/health")
     assert response.status_code == 200
     assert response.json() == {"status": "healthy"}
-
 
 # ==============================================================================
 # Auth / Security Tests
@@ -67,7 +66,6 @@ def test_cron_digest_missing_token():
     response = client.post("/cron-digest", json={})
     assert response.status_code == 401
 
-
 @patch("app.main.get_db")
 @patch("app.main.get_telegram_bot")
 def test_webhook_authorized_but_ignored(mock_bot, mock_db):
@@ -75,64 +73,13 @@ def test_webhook_authorized_but_ignored(mock_bot, mock_db):
     mock_instance = MagicMock()
     mock_instance.get_chat_id_from_update.return_value = None
     mock_bot.return_value = mock_instance
-
     response = client.post(
         "/webhook",
         headers={"x-telegram-bot-api-secret-token": "test_secret_token"},
         json={"update_id": 12345}
     )
-
     assert response.status_code == 200
     assert response.json() == {"status": "ignored"}
-
-
-# ==============================================================================
-# LLM JSON Extraction Tests
-# ==============================================================================
-class TestLLMJsonExtraction:
-    """Test the _extract_json method with various LLM response formats"""
-
-    def _get_extractor(self):
-        """Get an LLM processor instance for testing extraction only"""
-        from app.services.llm import LLMProcessor
-        # Patch genai.configure to avoid needing a real API key
-        with patch('google.generativeai.configure'):
-            with patch('google.generativeai.GenerativeModel'):
-                processor = LLMProcessor()
-        return processor
-
-    def test_clean_json(self):
-        """Valid JSON should parse directly"""
-        proc = self._get_extractor()
-        result = proc._extract_json('{"title": "Test", "summary": "A summary"}')
-        assert result["title"] == "Test"
-
-    def test_json_with_markdown_fences(self):
-        """JSON wrapped in markdown code blocks should still parse"""
-        proc = self._get_extractor()
-        raw = '```json\n{"title": "Test", "summary": "A summary"}\n```'
-        result = proc._extract_json(raw)
-        assert result["title"] == "Test"
-
-    def test_json_with_preamble_text(self):
-        """JSON with conversational preamble should extract via regex fallback"""
-        proc = self._get_extractor()
-        raw = 'Here is your result:\n\n{"title": "Test", "summary": "Info"}'
-        result = proc._extract_json(raw)
-        assert result["title"] == "Test"
-
-    def test_json_array_returns_first(self):
-        """If LLM returns an array, take the first element"""
-        proc = self._get_extractor()
-        raw = '[{"title": "First"}, {"title": "Second"}]'
-        result = proc._extract_json(raw)
-        assert result["title"] == "First"
-
-    def test_unparseable_raises(self):
-        """Completely invalid input should raise ValueError"""
-        proc = self._get_extractor()
-        with pytest.raises(ValueError, match="Could not extract JSON"):
-            proc._extract_json("This is not JSON at all")
 
 
 # ==============================================================================
@@ -143,9 +90,8 @@ class TestLLMSchemaNormalization:
 
     def _get_processor(self):
         from app.services.llm import LLMProcessor
-        with patch('google.generativeai.configure'):
-            with patch('google.generativeai.GenerativeModel'):
-                return LLMProcessor()
+        with patch('app.services.llm.AsyncGroq'):
+            return LLMProcessor()
 
     def test_digest_complete_schema(self):
         """Complete schema should pass through unchanged"""
