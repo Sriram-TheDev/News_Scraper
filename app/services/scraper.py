@@ -139,9 +139,10 @@ class Scraper:
             try:
                 markdown = self.scrape_url(url)
                 if markdown and markdown.strip():
+                    # Truncate to ~10,000 characters to stay within Groq TPM limit
                     results.append({
                         'url': url,
-                        'markdown': markdown
+                        'markdown': markdown[:10000]
                     })
                 else:
                     logger.warning(f"Scrape returned empty content for {url}, skipping")
