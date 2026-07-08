@@ -97,9 +97,8 @@ SEARCH QUERY: {query}
             raise ValueError("GEMINI_API_KEY must be set in environment variables")
 
         genai.configure(api_key=api_key)
-        # Pinned to a stable, widely available model.
-        # If upgrading, verify availability via ModelService.ListModels first.
-        self.model = genai.GenerativeModel('gemini-2.0-flash')
+        # Using the base legacy model (Gemini 1.0 Pro) which is guaranteed to exist on old SDKs
+        self.model = genai.GenerativeModel('gemini-pro')
 
     async def synthesize_digest_async(self, scraped_content: str, tags: List[str]) -> Dict:
         """
