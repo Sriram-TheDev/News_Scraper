@@ -113,7 +113,8 @@ class Scraper:
                     if result_dict['url']:
                         md = self.scrape_url(result_dict['url'])
                         if md and md.strip():
-                            result_dict['markdown'] = f"Headline: {result_dict['title']}\n\n{md}"
+                            # Defensively truncate to ~8000 characters (~2000 tokens) per article to stay well below Groq's 12k TPM free tier limit
+                            result_dict['markdown'] = f"Headline: {result_dict['title']}\n\n{md[:8000]}"
                             return
                 except Exception as e:
                     logger.warning(f"Live search deep scrape failed for {result_dict['url']}: {str(e)}")
