@@ -1,0 +1,5 @@
+f89b1518d715fa1897ae1e3f5f7d48fec0c17a03 fix: aggressively truncate digest lane scrape markdown to 10k chars to prevent Groq TPM crashes on multiple large sources
+3357a9f80b7b2a815a0cdef5289ac52d182eac7f fix: forcefully mandate source_link parameter in live report prompt to ensure source citations are always displayed
+daacad5016c767911ab850b29db4365910bd4600 fix: defensively truncate scraped markdown bodies to stay below Groq TPM limits
+202b2387e139daad371663907eb0d810b4e4b456 feat: bypass Google News RSS encryption to parallel scrape full live articles
+ddf222d24624024765b4cc4a345112dac82d1b56 refactor: migrate from Gemini to Groq API for faster and unlimited live reporting

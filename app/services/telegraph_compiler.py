@@ -84,14 +84,14 @@ class TelegraphCompiler:
             verified_urls = await asyncio.gather(*tasks)
 
         # Step 2: Inject verified URLs back into the payload
-        html_content = "<h2>Morning News Digest</h2>"
+        html_content = "<h3>Morning News Digest</h3>"
         for i, item in enumerate(news_items):
             title = item.get('title', 'Untitled')
             summary = item.get('summary', '')
             image_url = verified_urls[i]
             source_link = item.get('source_link', '')
 
-            html_content += f"<hr/><h3>{title}</h3>"
+            html_content += f"<hr/><h4>{title}</h4>"
             html_content += f"<p>{summary}</p>"
 
             if image_url:
