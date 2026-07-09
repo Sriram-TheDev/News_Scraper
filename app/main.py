@@ -150,11 +150,17 @@ async def cron_digest(
                 now_ist = datetime.datetime.now(ist)
 
                 target_hour, target_minute = map(int, delivery_time.split(':'))
-                target_time = now_ist.replace(hour=target_hour, minute=target_minute, second=0, microsecond=0)
+                
+                # Check if current time is within +/- 15 minutes, properly handling midnight wraparounds
+                now_mins = now_ist.hour * 60 + now_ist.minute
+                target_mins = target_hour * 60 + target_minute
+                
+                diff_minutes = min(
+                    abs(now_mins - target_mins),
+                    1440 - abs(now_mins - target_mins)
+                )
 
-                # Check if current time is within +/- 15 minutes of scheduled time
-                time_diff = abs((now_ist - target_time).total_seconds())
-                if time_diff > 900:  # 15 minutes window
+                if diff_minutes > 15:
                     return {
                         "status": "skipped",
                         "detail": f"Time mismatch. Current IST: {now_ist.strftime('%H:%M')}, Target: {delivery_time}"
@@ -204,7 +210,9 @@ async def cron_digest(
                     continue
 
         if not news_items:
-            await get_telegram_bot().send_admin_alert("No new news to deliver")
+            # Avoid sending admin alerts for "No new news" to prevent spam during duplicate
+            # cron ping windows (if scheduled cron hits >1 times in the 15m threshold).
+            logger.info("No new news to deliver.")
             return {"status": "no_new_news"}
 
         # Compile to Telegraph page concurrently
@@ -289,12 +297,12 @@ async def handle_command(chat_id: str, text: str):
             chat_id,
             "👋 *Welcome to JIT News Bot*\n\n"
             "Commands:\n"
-            "/addtag <tag> - Add a news tag\n"
-            "/removetag <tag> - Remove a tag\n"
-            "/addsource <url> - Add a news source\n"
-            "/removesource <url> - Remove a source\n"
-            "/settime <HH:MM> - Set delivery time (24h)\n"
-            "/search <query> - Live news search\n"
+            "/addtag [tag] - Add a news tag\n"
+            "/removetag [tag] - Remove a tag\n"
+            "/addsource [url] - Add a news source\n"
+            "/removesource [url] - Remove a source\n"
+            "/settime [HH:MM] - Set delivery time (24h)\n"
+            "/search [query] - Live news search\n"
             "/status - Show current settings"
         )
 
