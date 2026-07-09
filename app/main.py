@@ -202,9 +202,6 @@ async def cron_digest(
                     synthesized = await llm.synthesize_digest_async(item['markdown'], tags)
                     synthesized['source_link'] = url
                     news_items.append(synthesized)
-
-                    # Mark as delivered
-                    await asyncio.to_thread(db.mark_url_delivered, url)
                 except Exception as e:
                     logger.warning(f"Skipping article from {url} due to synthesis error: {e}")
                     continue
@@ -222,6 +219,10 @@ async def cron_digest(
         # Send to admin
         telegram_bot = get_telegram_bot()
         await telegram_bot.send_digest_link(settings.admin_chat_id, telegraph_url)
+
+        # Mark all URLs as delivered ONLY after successful Telegram delivery
+        for item in news_items:
+            await asyncio.to_thread(db.mark_url_delivered, item['source_link'])
 
         # Perform routine database cleanup (Log rotation)
         await asyncio.to_thread(db.delete_old_digest_buffers, 7)
