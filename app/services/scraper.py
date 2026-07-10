@@ -5,6 +5,10 @@ Follows specifications from 02-Architecture-and-Cloud-Ecosystem.md
 
 Fixes applied:
 - BUG 8: Uses config.settings instead of raw os.getenv()
+- ROOT-FIX-1: Switched from homepage scraping to RSS-based article discovery.
+  The old approach scraped homepage URLs and stored them in url_history for dedup.
+  Since homepage URLs never change, dedup permanently blocked all future digests.
+  Now we discover individual article URLs per source domain via Google News RSS.
 """
 
 import urllib.request
@@ -14,6 +18,7 @@ import logging
 import base64
 import re
 import concurrent.futures
+from urllib.parse import urlparse
 from typing import List, Optional
 from firecrawl import FirecrawlApp
 
@@ -30,6 +35,18 @@ class Scraper:
         if not api_key:
             raise ValueError("FIRECRAWL_API_KEY must be set in environment variables")
         self.app = FirecrawlApp(api_key=api_key)
+
+    def _extract_domain(self, url: str) -> str:
+        """Extract the bare domain from a URL for Google News site: queries."""
+        try:
+            parsed = urlparse(url)
+            domain = parsed.netloc or parsed.path
+            # Strip www. prefix for cleaner site: queries
+            if domain.startswith("www."):
+                domain = domain[4:]
+            return domain
+        except Exception:
+            return url
 
     def _decode_google_news_url(self, raw_url: str) -> str:
         """
@@ -74,6 +91,55 @@ class Scraper:
             return scrape_result.get('markdown', '')
         except Exception as e:
             raise Exception(f"Firecrawl scrape failed for {url}: {str(e)}")
+
+    def discover_articles_from_source(self, source_url: str, max_articles: int = 3) -> List[dict]:
+        """
+        Discover individual article URLs from a source using Google News RSS.
+        
+        Instead of scraping the source homepage (which yields a static URL that
+        poisons deduplication), we query Google News RSS with `site:<domain>` to
+        find the latest individual article URLs published on that domain.
+        
+        Returns a list of dicts: [{'url': '<article_url>', 'title': '<headline>'}]
+        """
+        domain = self._extract_domain(source_url)
+        if not domain or domain == "example.com":
+            logger.info(f"Skipping placeholder/invalid source: {source_url}")
+            return []
+
+        try:
+            encoded_query = urllib.parse.quote(f"site:{domain}")
+            req = urllib.request.Request(
+                f'https://news.google.com/rss/search?q={encoded_query}&hl=en-US&gl=US&ceid=US:en',
+                headers={'User-Agent': 'Mozilla/5.0 (compatible; JIT-News-Bot/1.0)'}
+            )
+
+            raw_xml = urllib.request.urlopen(req, timeout=10.0).read()
+            root = ET.fromstring(raw_xml)
+            items = root.findall('.//item')
+
+            if not items:
+                logger.info(f"No RSS articles found for domain: {domain}")
+                return []
+
+            articles = []
+            for item in items[:max_articles]:
+                title_elem = item.find('title')
+                link_elem = item.find('link')
+
+                raw_url = link_elem.text if link_elem is not None else ''
+                true_url = self._decode_google_news_url(raw_url)
+                title = title_elem.text if title_elem is not None else ''
+
+                if true_url and true_url.startswith('http'):
+                    articles.append({'url': true_url, 'title': title})
+
+            logger.info(f"Discovered {len(articles)} articles from {domain}")
+            return articles
+
+        except Exception as e:
+            logger.warning(f"RSS article discovery failed for {domain}: {str(e)}")
+            return []
 
     def search_query(self, query: str) -> List[dict]:
         """Search for a specific query using Google News RSS, decode actual links, and deeply scrape in parallel"""
@@ -128,30 +194,66 @@ class Scraper:
         except Exception as e:
             raise Exception(f"Live search failed for query '{query}': {str(e)}")
 
-    def scrape_multiple_urls(self, urls: List[str]) -> List[dict]:
+    def scrape_articles_for_digest(self, source_urls: List[str], max_per_source: int = 2) -> List[dict]:
         """
-        Scrape multiple URLs (for Digest lane)
-        Returns list of dicts with url and markdown content.
-        Only returns items with actual content (empty/failed scrapes are filtered out).
+        Discover and scrape individual articles from each source for the daily digest.
+        
+        This replaces the old `scrape_multiple_urls` which scraped homepage URLs directly.
+        Now we:
+        1. For each source, discover individual article URLs via Google News RSS 
+        2. Collect all unique article URLs across all sources
+        3. Scrape each article via Firecrawl concurrently
+        4. Return results keyed by individual article URL (enabling proper dedup)
+        
+        Returns list of dicts: [{'url': '<article_url>', 'markdown': '<content>'}]
         """
+        # Step 1: Discover articles from all sources
+        all_articles = {}  # url -> title (dedup across sources)
+        for source_url in source_urls:
+            discovered = self.discover_articles_from_source(source_url, max_articles=max_per_source)
+            for article in discovered:
+                url = article['url']
+                if url not in all_articles:
+                    all_articles[url] = article['title']
+
+        if not all_articles:
+            logger.warning("No articles discovered from any source via RSS")
+            return []
+
+        logger.info(f"Total unique articles discovered: {len(all_articles)}")
+
+        # Step 2: Concurrently scrape all discovered articles
         results = []
-        for url in urls:
+        results_lock = __import__('threading').Lock()
+
+        def scrape_article(url_title_pair):
+            url, title = url_title_pair
             try:
                 markdown = self.scrape_url(url)
                 if markdown and markdown.strip():
-                    # Truncate to ~10,000 characters to stay within Groq TPM limit
-                    results.append({
-                        'url': url,
-                        'markdown': markdown[:10000]
-                    })
+                    with results_lock:
+                        results.append({
+                            'url': url,
+                            'title': title,
+                            'markdown': markdown[:10000]  # Truncate for TPM safety
+                        })
                 else:
-                    logger.warning(f"Scrape returned empty content for {url}, skipping")
+                    logger.warning(f"Empty content scraped for article: {url[:80]}")
             except Exception as e:
-                # BUG 5 FIX: Log error but do NOT append items with empty markdown.
-                # Previously, failed scrapes were still appended with empty markdown,
-                # causing the LLM to receive empty payloads and hallucinate.
-                logger.warning(f"Failed to scrape {url}: {str(e)}")
+                logger.warning(f"Failed to scrape article {url[:80]}: {str(e)}")
+
+        with concurrent.futures.ThreadPoolExecutor(max_workers=5) as executor:
+            executor.map(scrape_article, all_articles.items())
+
+        logger.info(f"Successfully scraped {len(results)} of {len(all_articles)} articles")
         return results
+
+    def scrape_multiple_urls(self, urls: List[str]) -> List[dict]:
+        """
+        Legacy method - now delegates to scrape_articles_for_digest.
+        Kept for backward compatibility with the cron_digest endpoint.
+        """
+        return self.scrape_articles_for_digest(urls)
 
 
 # Singleton instance

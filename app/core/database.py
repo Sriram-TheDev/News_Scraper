@@ -136,6 +136,64 @@ class Database:
         except Exception as e:
             logger.error(f"Log rotation failed: {e}")
 
+    def has_digest_been_sent_today(self) -> bool:
+        """
+        Check if today's digest has already been delivered (IST date).
+        Uses digest_buffer with status='digest_delivered' and today's IST date.
+        This prevents duplicate deliveries when the cron fires multiple times
+        within the wider ±30 minute time window.
+        """
+        try:
+            import pytz
+            ist = pytz.timezone("Asia/Kolkata")
+            today_ist = datetime.datetime.now(ist).strftime("%Y-%m-%d")
+
+            # Check for a delivery marker for today
+            response = self.client.table("digest_buffer") \
+                .select("id") \
+                .eq("status", "digest_delivered") \
+                .gte("generated_at", f"{today_ist}T00:00:00+05:30") \
+                .lte("generated_at", f"{today_ist}T23:59:59+05:30") \
+                .limit(1) \
+                .execute()
+
+            return len(response.data) > 0
+        except Exception as e:
+            logger.error(f"Failed to check today's digest status: {e}")
+            return False  # Fail-open: allow delivery if check fails
+
+    def mark_digest_sent_today(self) -> None:
+        """
+        Record that today's digest was successfully delivered.
+        Inserts a marker row into digest_buffer with status='digest_delivered'.
+        """
+        try:
+            self.client.table("digest_buffer").insert({
+                "content_payload": f"Digest delivered at {datetime.datetime.now(datetime.timezone.utc).isoformat()}",
+                "status": "digest_delivered"
+            }).execute()
+            logger.info("Marked today's digest as delivered")
+        except Exception as e:
+            logger.error(f"Failed to mark digest as delivered: {e}")
+
+    def clean_stale_homepage_urls(self, source_urls: List[str]) -> int:
+        """
+        Remove stale homepage URLs from url_history.
+        These were incorrectly stored by the old scraper that deduped on
+        source homepage URLs instead of individual article URLs.
+        Returns the count of removed entries.
+        """
+        removed = 0
+        for url in source_urls:
+            try:
+                response = self.client.table("url_history").delete().eq("url", url).execute()
+                if response.data:
+                    removed += len(response.data)
+                    logger.info(f"Cleaned stale homepage URL: {url}")
+            except Exception as e:
+                logger.warning(f"Failed to clean URL {url}: {e}")
+        return removed
+
 
 # Singleton instance
 _db_instance: Optional[Database] = None

@@ -131,7 +131,14 @@ async def cron_digest(
     _auth: bool = Depends(verify_cron_token),
 ):
     """
-    Handle cron-job.org heartbeat for scheduled digest
+    Handle cron-job.org heartbeat for scheduled digest.
+    
+    Works like an alarm clock:
+    1. Checks if current IST time is within ±30 minutes of the set delivery time
+    2. Checks if today's digest has already been delivered (prevents duplicates)
+    3. Discovers fresh article URLs from source domains via Google News RSS
+    4. Synthesizes, compiles, and delivers the digest
+    
     Verified via constant-time token comparison (centralized via Depends)
     """
     try:
@@ -142,7 +149,9 @@ async def cron_digest(
         db = get_db()
         bot_settings = await asyncio.to_thread(db.get_bot_settings)
 
-        # 1. Enforce Delivery Time (IST +05:30)
+        # =====================================================================
+        # GATE 1: Time Window Check (±30 minutes — robust alarm-style)
+        # =====================================================================
         delivery_time = bot_settings.get('delivery_time')
         if delivery_time:
             try:
@@ -151,7 +160,7 @@ async def cron_digest(
 
                 target_hour, target_minute = map(int, delivery_time.split(':'))
                 
-                # Check if current time is within +/- 15 minutes, properly handling midnight wraparounds
+                # Calculate circular time difference (handles midnight wraparound)
                 now_mins = now_ist.hour * 60 + now_ist.minute
                 target_mins = target_hour * 60 + target_minute
                 
@@ -160,14 +169,33 @@ async def cron_digest(
                     1440 - abs(now_mins - target_mins)
                 )
 
-                if diff_minutes > 15:
+                if diff_minutes > 30:
+                    logger.info(
+                        f"Cron skipped: time outside window. "
+                        f"Current IST={now_ist.strftime('%H:%M')}, "
+                        f"Target={delivery_time}, Diff={diff_minutes}min (need ≤30)"
+                    )
                     return {
                         "status": "skipped",
-                        "detail": f"Time mismatch. Current IST: {now_ist.strftime('%H:%M')}, Target: {delivery_time}"
+                        "detail": f"Time mismatch. Current IST: {now_ist.strftime('%H:%M')}, Target: {delivery_time}, Diff: {diff_minutes}min"
                     }
             except Exception as e:
                 logger.error(f"Timezone parsing failed for '{delivery_time}': {e}")
 
+        # =====================================================================
+        # GATE 2: Same-Day Delivery Guard (prevents duplicate sends)
+        # =====================================================================
+        already_sent = await asyncio.to_thread(db.has_digest_been_sent_today)
+        if already_sent:
+            logger.info("Cron skipped: today's digest has already been delivered.")
+            return {
+                "status": "already_delivered",
+                "detail": "Today's digest was already sent successfully."
+            }
+
+        # =====================================================================
+        # STEP 1: One-time cleanup of stale homepage URLs from old scraper
+        # =====================================================================
         sources = bot_settings.get('sources', [])
         tags = bot_settings.get('tags', [])
 
@@ -175,7 +203,15 @@ async def cron_digest(
             await get_telegram_bot().send_admin_alert("No sources configured for digest")
             return {"status": "no_sources"}
 
-        # Scrape all sources (empty/failed scrapes are already filtered by scraper)
+        # Clean stale homepage URLs that were incorrectly stored by the old scraper
+        # This is idempotent — once cleaned, subsequent runs find nothing to clean
+        stale_cleaned = await asyncio.to_thread(db.clean_stale_homepage_urls, sources)
+        if stale_cleaned > 0:
+            logger.info(f"Cleaned {stale_cleaned} stale homepage URLs from url_history")
+
+        # =====================================================================
+        # STEP 2: Discover & scrape individual articles from sources
+        # =====================================================================
         scraper = get_scraper()
         scraped_data = await asyncio.to_thread(scraper.scrape_multiple_urls, sources)
 
@@ -183,7 +219,9 @@ async def cron_digest(
             await get_telegram_bot().send_admin_alert("All sources failed to scrape — no data available")
             return {"status": "scrape_failed"}
 
-        # Bulk query for deduplication (Fixes N+1 issue)
+        # =====================================================================
+        # STEP 3: Deduplicate against individual article URLs
+        # =====================================================================
         detected_urls = [item['url'] for item in scraped_data]
         delivered_urls = await asyncio.to_thread(db.get_delivered_urls_bulk, detected_urls)
 
@@ -191,7 +229,7 @@ async def cron_digest(
         for item in scraped_data:
             url = item['url']
             if url not in delivered_urls:
-                # Secondary guard: skip items with empty markdown (shouldn't happen after scraper fix)
+                # Secondary guard: skip items with empty markdown
                 if not item.get('markdown', '').strip():
                     logger.warning(f"Skipping {url}: empty markdown content")
                     continue
@@ -207,12 +245,12 @@ async def cron_digest(
                     continue
 
         if not news_items:
-            # Avoid sending admin alerts for "No new news" to prevent spam during duplicate
-            # cron ping windows (if scheduled cron hits >1 times in the 15m threshold).
-            logger.info("No new news to deliver.")
+            logger.info("No new news to deliver after deduplication.")
             return {"status": "no_new_news"}
 
-        # Compile to Telegraph page concurrently
+        # =====================================================================
+        # STEP 4: Compile Telegraph page & deliver
+        # =====================================================================
         telegraph = get_telegraph()
         telegraph_url = await telegraph.compile_digest_page_async(news_items)
 
@@ -220,13 +258,17 @@ async def cron_digest(
         telegram_bot = get_telegram_bot()
         await telegram_bot.send_digest_link(settings.admin_chat_id, telegraph_url)
 
-        # Mark all URLs as delivered ONLY after successful Telegram delivery
+        # Mark all article URLs as delivered ONLY after successful Telegram delivery
         for item in news_items:
             await asyncio.to_thread(db.mark_url_delivered, item['source_link'])
+
+        # Mark today's digest as sent (same-day guard)
+        await asyncio.to_thread(db.mark_digest_sent_today)
 
         # Perform routine database cleanup (Log rotation)
         await asyncio.to_thread(db.delete_old_digest_buffers, 7)
 
+        logger.info(f"Digest delivered successfully: {telegraph_url}")
         return {"status": "success", "telegraph_url": telegraph_url}
 
     except Exception as e:

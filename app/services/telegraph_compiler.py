@@ -5,15 +5,45 @@ Follows specifications from 04-Security-Guardrails.md
 
 Fixes applied:
 - BUG 9: SSRF allow-list aligned to spec (image/jpeg, image/png only — removed image/gif)
+- ROOT-FIX-2: HTML sanitization to prevent NotAllowedTag crashes
 """
 
 import asyncio
 import logging
+import re
 import httpx
 from typing import Dict, List, Optional
 from telegraph import Telegraph
 
 logger = logging.getLogger("jit_news_bot")
+
+# Telegraph API allowed tags (strict whitelist)
+TELEGRAPH_ALLOWED_TAGS = {
+    'a', 'aside', 'b', 'blockquote', 'br', 'code', 'em', 'figcaption',
+    'figure', 'h3', 'h4', 'hr', 'i', 'img', 'li', 'ol', 'p', 'pre',
+    's', 'strong', 'u', 'ul'
+}
+
+# Mapping of disallowed tags to their nearest allowed equivalent
+TAG_REPLACEMENTS = {
+    'h1': 'h3',
+    'h2': 'h3',
+    'h5': 'h4',
+    'h6': 'h4',
+    'div': 'p',
+    'span': '',       # strip span, keep content
+    'section': 'p',
+    'article': 'p',
+    'header': 'p',
+    'footer': 'p',
+    'nav': '',        # strip nav entirely
+    'table': 'p',
+    'thead': '',
+    'tbody': '',
+    'tr': 'p',
+    'td': '',
+    'th': 'strong',
+}
 
 
 class TelegraphCompiler:
@@ -29,6 +59,54 @@ class TelegraphCompiler:
             author_name='JIT News',
             author_url='https://t.me/your_bot'
         )
+
+    @staticmethod
+    def _sanitize_html(html_content: str) -> str:
+        """
+        Sanitize HTML to only contain Telegraph-allowed tags.
+        
+        Replaces known disallowed tags with their nearest equivalent,
+        and strips any remaining unknown tags while preserving their text content.
+        This prevents the telegraph.exceptions.NotAllowedTag crash that killed
+        the July 9 digest (error: 'h2' tag is not allowed).
+        """
+        result = html_content
+
+        # Step 1: Replace known disallowed tags with equivalents
+        for bad_tag, replacement_tag in TAG_REPLACEMENTS.items():
+            if replacement_tag:
+                # Replace opening and closing tags
+                result = re.sub(
+                    rf'<{bad_tag}(\s[^>]*)?>',
+                    f'<{replacement_tag}>',
+                    result,
+                    flags=re.IGNORECASE
+                )
+                result = re.sub(
+                    rf'</{bad_tag}>',
+                    f'</{replacement_tag}>',
+                    result,
+                    flags=re.IGNORECASE
+                )
+            else:
+                # Strip tag entirely but keep content
+                result = re.sub(
+                    rf'</?{bad_tag}(\s[^>]*)?>',
+                    '',
+                    result,
+                    flags=re.IGNORECASE
+                )
+
+        # Step 2: Strip any remaining unknown tags (safety net)
+        def replace_unknown_tag(match):
+            tag_name = match.group(1).lower().split()[0]  # Get tag name without attributes
+            if tag_name.lstrip('/') in TELEGRAPH_ALLOWED_TAGS:
+                return match.group(0)  # Keep allowed tags
+            return ''  # Strip unknown tags
+
+        result = re.sub(r'<(/?\w[^>]*)>', replace_unknown_tag, result)
+
+        return result
 
     async def verify_image_url_async(self, client: httpx.AsyncClient, url: str) -> str:
         """
@@ -100,7 +178,10 @@ class TelegraphCompiler:
             if source_link:
                 html_content += f'<p><a href="{source_link}">Read more</a></p>'
 
-        # Step 3: Run the synchronous Telegraph API in a thread to prevent blocking
+        # Step 3: Sanitize HTML to prevent NotAllowedTag crashes
+        html_content = self._sanitize_html(html_content)
+
+        # Step 4: Run the synchronous Telegraph API in a thread to prevent blocking
         try:
             page = await asyncio.to_thread(
                 self.telegraph.create_page,
